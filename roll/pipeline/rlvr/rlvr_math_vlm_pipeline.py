@@ -222,13 +222,15 @@ class RLVRMathVLMPipeline(BasePipeline):
             worker_config=self.pipeline_config.actor_infer,
         )
         # use unwrapped model as reference for lora training
-        if not self.is_lora:
+        if not self.is_lora and self.pipeline_config.use_reference_model:
             self.reference: Any = Cluster(
                 name=self.pipeline_config.reference.name,
                 worker_cls=self.pipeline_config.reference.worker_cls,
                 resource_manager=self.resource_manager,
                 worker_config=self.pipeline_config.reference,
             )
+        elif not self.pipeline_config.use_reference_model:
+            logger.info("Reference model is disabled by configuration.")
         self.rewards: Dict[str, Any] = {
             key: Cluster(
                 name=f"reward-{key}",
@@ -264,7 +266,7 @@ class RLVRMathVLMPipeline(BasePipeline):
         ray.get(refs)
 
         refs = []
-        if not self.is_lora:
+        if not self.is_lora and self.pipeline_config.use_reference_model:
             refs.extend(self.reference.initialize(pipeline_config=self.pipeline_config, blocking=False))
         refs.extend(self.reward.initialize(pipeline_config=self.pipeline_config, blocking=False))
         ray.get(refs)
@@ -366,19 +368,32 @@ class RLVRMathVLMPipeline(BasePipeline):
                             ref_log_probs_refs: List[ray.ObjectRef] = self.actor_train.compute_log_probs(
                                 batch, blocking=False
                             )
-                        else:
+                        elif self.pipeline_config.use_reference_model:
                             ref_log_probs_refs: List[ray.ObjectRef] = self.reference.compute_log_probs(
                                 batch, blocking=False
                             )
+                        else:
+                            # When reference model is disabled, create empty ref_log_probs tensor with same shape as log_probs
+                            ref_log_probs = DataProto(
+                                batch={
+                                    "log_probs": torch.zeros_like(batch.batch["log_probs"], dtype=torch.float32)
+                                },
+                                meta_info={}
+                            )
+                            ref_log_probs.rename(old_keys="log_probs", new_keys="ref_log_probs")
+                            batch = batch.union(ref_log_probs)
+                            ref_log_probs_refs = None
+
                         rewards_refs: List[ray.ObjectRef] = self.reward.compute_rewards(batch, blocking=False)
 
-                        ref_log_probs = DataProto.materialize_concat(data_refs=ref_log_probs_refs)
-                        rewards = DataProto.materialize_concat(data_refs=rewards_refs)
+                        if ref_log_probs_refs is not None:
+                            ref_log_probs = DataProto.materialize_concat(data_refs=ref_log_probs_refs)
+                            metrics.update(reduce_metrics(ref_log_probs.meta_info.pop("metrics", {})))
+                            ref_log_probs.rename(old_keys="log_probs", new_keys="ref_log_probs")
+                            batch = batch.union(ref_log_probs)
 
-                        metrics.update(reduce_metrics(ref_log_probs.meta_info.pop("metrics", {})))
+                        rewards = DataProto.materialize_concat(data_refs=rewards_refs)
                         metrics.update(reduce_metrics(rewards.meta_info.pop("metrics", {})))
-                        ref_log_probs.rename(old_keys="log_probs", new_keys="ref_log_probs")
-                        batch = batch.union(ref_log_probs)
                         batch = batch.union(rewards)
                     metrics["time/ref_log_probs_values_reward"] = cal_timer.last
 

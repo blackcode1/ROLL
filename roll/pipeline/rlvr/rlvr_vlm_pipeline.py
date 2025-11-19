@@ -313,13 +313,17 @@ class RLVRVLMPipeline(BasePipeline):
             resource_manager=self.resource_manager,
             worker_config=self.pipeline_config.actor_infer,
         )
-        self.reference: Any = Cluster(
-            name=self.pipeline_config.reference.name,
-            worker_cls=self.pipeline_config.reference.worker_cls,
-            resource_manager=self.resource_manager,
-            worker_config=self.pipeline_config.reference,
-        )
-        download_clusters = [self.actor_train, self.actor_infer, self.reference]
+        if self.pipeline_config.use_reference_model:
+            self.reference: Any = Cluster(
+                name=self.pipeline_config.reference.name,
+                worker_cls=self.pipeline_config.reference.worker_cls,
+                resource_manager=self.resource_manager,
+                worker_config=self.pipeline_config.reference,
+            )
+            download_clusters = [self.actor_train, self.actor_infer, self.reference]
+        else:
+            download_clusters = [self.actor_train, self.actor_infer]
+            logger.info("Reference model is disabled by configuration.")
         if self.pipeline_config.adv_estimator == "gae":
             self.critic: Any = Cluster(
                 name=self.pipeline_config.critic.name,
@@ -434,7 +438,8 @@ class RLVRVLMPipeline(BasePipeline):
         refs.extend(self.actor_infer.initialize(pipeline_config=self.pipeline_config, blocking=False))
         ray.get(refs)
 
-        refs.extend(self.reference.initialize(pipeline_config=self.pipeline_config, blocking=True))
+        if self.pipeline_config.use_reference_model:
+            refs.extend(self.reference.initialize(pipeline_config=self.pipeline_config, blocking=True))
         refs = []
         for key, cluster in self.rewards.items():
             refs.extend(cluster.initialize(pipeline_config=self.pipeline_config, blocking=False))
@@ -542,7 +547,16 @@ class RLVRVLMPipeline(BasePipeline):
                 batch.meta_info["_broadcast_non_tensor_batch"]= True
 
                 with Timer(name="cal_ref_log_probs", logger=None) as cal_ref_log_probs_timer:
-                    ref_log_probs = self.reference.compute_log_probs(batch, blocking=True)
+                    if self.pipeline_config.use_reference_model:
+                        ref_log_probs = self.reference.compute_log_probs(batch, blocking=True)
+                    else:
+                        # When reference model is disabled, create empty ref_log_probs tensor with same shape as log_probs
+                        ref_log_probs = DataProto(
+                            batch={
+                                "log_probs": torch.zeros_like(batch.batch["log_probs"], dtype=torch.float32)
+                            },
+                            meta_info={}
+                        )
                     metrics_mgr.add_reduced_metrics(ref_log_probs.meta_info.pop("metrics", {}))
                     ref_log_probs.rename(old_keys="log_probs", new_keys="ref_log_probs")
                     batch = batch.union(ref_log_probs)

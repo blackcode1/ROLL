@@ -285,6 +285,7 @@ class ActorWorker(Worker):
 
         pg_loss = agg_loss(loss_mat=pg_loss, loss_mask=response_mask, loss_agg_mode=self.pipeline_config.loss_agg_mode)
 
+        # 当use_reference_model为False时，ref_log_probs为零，所以kl_loss为零
         kl_loss = compute_approx_kl(log_probs=log_probs, log_probs_base=ref_log_probs, action_mask=response_mask,
                                     kl_penalty="k3")
         kl_loss = agg_loss(loss_mat=kl_loss, loss_mask=response_mask, loss_agg_mode=self.pipeline_config.loss_agg_mode)
