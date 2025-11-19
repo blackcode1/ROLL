@@ -91,6 +91,10 @@ class RLVRConfig(PPOConfig):
         default=1,
         metadata={"help": "The number of return sequences in one group, used in generation_args."}
     )
+    use_reference_model: bool = field(
+        default=True,
+        metadata={"help": "Whether to use reference model in training. Set to False to disable the reference model."}
+    )
 
     generate_opt_level: int = field(
         default=1,
@@ -194,7 +198,7 @@ class RLVRConfig(PPOConfig):
                 self.actor_train,
                 self.critic,
                 self.rewards,
-                self.reference,
+                self.reference if self.use_reference_model else None,  # Only include reference if enabled
             ]:
                 if worker_config is None:
                     continue

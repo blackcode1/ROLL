@@ -216,7 +216,8 @@ class RLVRPipeline(BasePipeline):
         )
         download_clusters = [self.actor_train, self.actor_infer]
         # use unwrapped model as reference for lora training
-        if not self.is_lora:
+        # Also check if user explicitly disabled reference model
+        if not self.is_lora and self.pipeline_config.use_reference_model:
             self.reference: Any = Cluster(
                 name=self.pipeline_config.reference.name,
                 worker_cls=self.pipeline_config.reference.worker_cls,
@@ -310,7 +311,7 @@ class RLVRPipeline(BasePipeline):
         refs.extend(self.actor_infer.initialize(pipeline_config=self.pipeline_config, blocking=False))
         ray.get(refs)
 
-        if not self.is_lora:
+        if not self.is_lora and self.pipeline_config.use_reference_model:
             refs.extend(self.reference.initialize(pipeline_config=self.pipeline_config, blocking=True))
 
         refs = []
@@ -543,7 +544,7 @@ class RLVRPipeline(BasePipeline):
                         batch.meta_info["disable_adapter"] = True
                         batch.meta_info["is_offload_states"] = False
                         ref_log_probs = self.actor_train.compute_log_probs(batch, blocking=True)
-                    else:
+                    elif self.pipeline_config.use_reference_model:
                         if self.pipeline_config.reference.use_dynamic_batching_in_infer:
                             batch, dynamic_batching_metrics = dynamic_batching_shard(
                                 batch, 
@@ -554,6 +555,13 @@ class RLVRPipeline(BasePipeline):
                             )
                             metrics_mgr.add_metrics(dynamic_batching_metrics)
                         ref_log_probs = self.reference.compute_log_probs(batch, blocking=True)
+                    else:
+                        # When reference model is disabled, create empty ref_log_probs tensor with zeros
+                        # The reference log probs should have the same shape as response_mask[:, 1:] based on the model's output
+                        ref_log_probs = DataProto()
+                        # The log_probs shape should match the model output for each token position (excluding the first)
+                        ref_log_probs.batch = {"log_probs": torch.zeros_like(batch.batch["response_mask"][:, 1:], dtype=torch.float)}
+                    
                     metrics_mgr.add_reduced_metrics(ref_log_probs.meta_info.pop("metrics", {}))
                     ref_log_probs.rename(old_keys="log_probs", new_keys="ref_log_probs")
                     batch = batch.union(ref_log_probs)
