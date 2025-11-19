@@ -222,7 +222,7 @@ class RLVRMathVLMPipeline(BasePipeline):
             worker_config=self.pipeline_config.actor_infer,
         )
         # use unwrapped model as reference for lora training
-        if not self.is_lora:
+        if not self.is_lora and self.pipeline_config.use_reference:
             self.reference: Any = Cluster(
                 name=self.pipeline_config.reference.name,
                 worker_cls=self.pipeline_config.reference.worker_cls,
@@ -264,7 +264,7 @@ class RLVRMathVLMPipeline(BasePipeline):
         ray.get(refs)
 
         refs = []
-        if not self.is_lora:
+        if not self.is_lora and self.pipeline_config.use_reference:
             refs.extend(self.reference.initialize(pipeline_config=self.pipeline_config, blocking=False))
         refs.extend(self.reward.initialize(pipeline_config=self.pipeline_config, blocking=False))
         ray.get(refs)
@@ -361,24 +361,26 @@ class RLVRMathVLMPipeline(BasePipeline):
 
                     with Timer(name="cal_ref_log_probs_reward", logger=None) as cal_timer:
                         if self.is_lora:
-                            batch.meta_info["disable_adapter"] = True
-                            batch.meta_info["is_offload_states"] = False
                             ref_log_probs_refs: List[ray.ObjectRef] = self.actor_train.compute_log_probs(
                                 batch, blocking=False
                             )
-                        else:
+                        elif self.pipeline_config.use_reference:
                             ref_log_probs_refs: List[ray.ObjectRef] = self.reference.compute_log_probs(
                                 batch, blocking=False
                             )
+                        else:
+                            # Skip reference model computation when use_reference is False
+                            ref_log_probs_refs = []
                         rewards_refs: List[ray.ObjectRef] = self.reward.compute_rewards(batch, blocking=False)
 
-                        ref_log_probs = DataProto.materialize_concat(data_refs=ref_log_probs_refs)
-                        rewards = DataProto.materialize_concat(data_refs=rewards_refs)
-
-                        metrics.update(reduce_metrics(ref_log_probs.meta_info.pop("metrics", {})))
-                        metrics.update(reduce_metrics(rewards.meta_info.pop("metrics", {})))
-                        ref_log_probs.rename(old_keys="log_probs", new_keys="ref_log_probs")
-                        batch = batch.union(ref_log_probs)
+                        if ref_log_probs_refs:
+                            ref_log_probs = DataProto.materialize_concat(data_refs=ref_log_probs_refs)
+                            metrics.update(reduce_metrics(ref_log_probs.meta_info.pop("metrics", {})))
+                            ref_log_probs.rename(old_keys="log_probs", new_keys="ref_log_probs")
+                            batch = batch.union(ref_log_probs)
+                        else:
+                            # Skip reference model computation when use_reference is False
+                            batch.batch["ref_log_probs"] = batch.batch.get("log_probs", batch.batch.get("old_log_probs", torch.zeros_like(batch.batch["response_mask"])))
                         batch = batch.union(rewards)
                     metrics["time/ref_log_probs_values_reward"] = cal_timer.last
 

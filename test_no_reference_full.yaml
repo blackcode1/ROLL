@@ -1,0 +1,87 @@
+# Test configuration for disabling reference model
+# This is a minimal config to test the use_reference setting
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+exp_name: "test-no-reference"
+seed: 42
+logging_dir: ./output/logs
+output_dir: ./output
+
+# Disable reference model
+use_reference: false
+
+# Basic training parameters
+max_steps: 10
+save_steps: 5
+logging_steps: 1
+
+# Model configuration
+pretrain: Qwen/Qwen2.5-0.5B  # Using smaller model for testing
+
+# Batch sizes
+rollout_batch_size: 4
+num_return_sequences_in_group: 2
+prompt_length: 512
+response_length: 512
+
+# Actor configuration
+actor_train:
+  model_args:
+    model_name_or_path: ${pretrain}
+    dtype: bf16
+  training_args:
+    learning_rate: 1.0e-6
+    per_device_train_batch_size: 1
+    gradient_accumulation_steps: 4
+  data_args:
+    template: qwen2_5
+    file_name:
+      - data/math_benchmarks.jsonl
+  strategy_args:
+    strategy_name: hf_infer
+  device_mapping: [0]
+  infer_batch_size: 2
+
+actor_infer:
+  model_args:
+    model_name_or_path: ${pretrain}
+    dtype: bf16
+  generating_args:
+    max_new_tokens: ${response_length}
+    temperature: 0.7
+    num_return_sequences: ${num_return_sequences_in_group}
+  data_args:
+    template: qwen2_5
+  strategy_args:
+    strategy_name: hf_infer
+  device_mapping: [0]
+  infer_batch_size: 2
+
+# Reference model configuration (will be ignored when use_reference=false)
+reference:
+  model_args:
+    model_name_or_path: ${pretrain}
+    dtype: bf16
+  data_args:
+    template: qwen2_5
+  strategy_args:
+    strategy_name: hf_infer
+  device_mapping: [0]
+  infer_batch_size: 2
+
+# Simple reward configuration
+rewards:
+  math_rule:
+    worker_cls: roll.pipeline.rlvr.rewards.math_rule_reward_worker.MathRuleRewardWorker
+    reward_type: soft
+    model_args:
+      model_name_or_path: ${pretrain}
+    data_args:
+      template: qwen2_5
+    tag_included: [deepmath_103k, aime]
+    world_size: 1
+    infer_batch_size: 1
