@@ -222,7 +222,7 @@ class RLVRMathVLMPipeline(BasePipeline):
             worker_config=self.pipeline_config.actor_infer,
         )
         # use unwrapped model as reference for lora training
-        if not self.is_lora:
+        if not self.is_lora and self.pipeline_config.use_reference:
             self.reference: Any = Cluster(
                 name=self.pipeline_config.reference.name,
                 worker_cls=self.pipeline_config.reference.worker_cls,
@@ -361,15 +361,19 @@ class RLVRMathVLMPipeline(BasePipeline):
 
                     with Timer(name="cal_ref_log_probs_reward", logger=None) as cal_timer:
                         if self.is_lora:
-                            batch.meta_info["disable_adapter"] = True
-                            batch.meta_info["is_offload_states"] = False
                             ref_log_probs_refs: List[ray.ObjectRef] = self.actor_train.compute_log_probs(
                                 batch, blocking=False
                             )
                         else:
-                            ref_log_probs_refs: List[ray.ObjectRef] = self.reference.compute_log_probs(
-                                batch, blocking=False
-                            )
+                            if self.pipeline_config.use_reference:
+                                ref_log_probs_refs: List[ray.ObjectRef] = self.reference.compute_log_probs(
+                                    batch, blocking=False
+                                )
+                            else:
+                                # When reference model is disabled, use actor's own log probabilities as reference
+                                ref_log_probs_refs: List[ray.ObjectRef] = self.actor_infer.compute_log_probs(
+                                    batch, blocking=False
+                                )
                         rewards_refs: List[ray.ObjectRef] = self.reward.compute_rewards(batch, blocking=False)
 
                         ref_log_probs = DataProto.materialize_concat(data_refs=ref_log_probs_refs)
