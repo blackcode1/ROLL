@@ -25,6 +25,9 @@ class DPOConfig(BaseConfig):
 
     # role related
     pretrain: str = field(default=None, metadata={"help": "Path to pretrain model directory, if available."})
+    use_reference: bool = field(
+        default=True, metadata={"help": "Whether to use reference model in training."}
+    )
     validation: WorkerConfig = field(
         default_factory=WorkerConfig, metadata={"help": "Configuration for the validation."}
     )
@@ -59,10 +62,11 @@ class DPOConfig(BaseConfig):
 
         if (
             self.actor_train.model_args.model_name_or_path is None
-            or self.reference.model_args.model_name_or_path is None
+            or (self.use_reference and self.reference.model_args.model_name_or_path is None)
         ):
             self.actor_train.model_args.model_name_or_path = self.pretrain
-            self.reference.model_args.model_name_or_path = self.pretrain
+            if self.use_reference:
+                self.reference.model_args.model_name_or_path = self.pretrain
 
         # default worker_cls
         if self.actor_train.worker_cls is None:

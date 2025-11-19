@@ -296,6 +296,9 @@ class PPOConfig(BaseConfig):
     reward_pretrain: str = field(
         default=None, metadata={"help": "Path to pretrain model directory for the reward model, if available."}
     )
+    use_reference: bool = field(
+        default=True, metadata={"help": "Whether to use reference model in training."}
+    )
     actor_train: WorkerConfig = field(
         default_factory=WorkerConfig, metadata={"help": "Configuration for the actor's training role."}
     )
@@ -389,11 +392,12 @@ class PPOConfig(BaseConfig):
         if (
             self.actor_train.model_args.model_name_or_path is None
             or self.actor_infer.model_args.model_name_or_path is None
-            or self.reference.model_args.model_name_or_path is None
+            or (self.use_reference and self.reference.model_args.model_name_or_path is None)
         ):
             self.actor_train.model_args.model_name_or_path = self.pretrain
             self.actor_infer.model_args.model_name_or_path = self.pretrain
-            self.reference.model_args.model_name_or_path = self.pretrain
+            if self.use_reference:
+                self.reference.model_args.model_name_or_path = self.pretrain
 
         if self.critic.model_args.model_name_or_path is None:
             self.critic.model_args.model_name_or_path = self.reward_pretrain
