@@ -308,6 +308,9 @@ class PPOConfig(BaseConfig):
     reference: WorkerConfig = field(
         default_factory=WorkerConfig, metadata={"help": "Configuration for the reference role."}
     )
+    disable_reference_model: bool = field(
+        default=False, metadata={"help": "Whether to disable the reference model."}
+    )
 
     async_generation_ratio: float = field(
         default=0,
