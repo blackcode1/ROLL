@@ -222,7 +222,7 @@ class RLVRMathVLMPipeline(BasePipeline):
             worker_config=self.pipeline_config.actor_infer,
         )
         # use unwrapped model as reference for lora training
-        if not self.is_lora:
+        if not self.is_lora and self.pipeline_config.enable_reference:
             self.reference: Any = Cluster(
                 name=self.pipeline_config.reference.name,
                 worker_cls=self.pipeline_config.reference.worker_cls,
@@ -264,7 +264,7 @@ class RLVRMathVLMPipeline(BasePipeline):
         ray.get(refs)
 
         refs = []
-        if not self.is_lora:
+        if not self.is_lora and self.pipeline_config.enable_reference:
             refs.extend(self.reference.initialize(pipeline_config=self.pipeline_config, blocking=False))
         refs.extend(self.reward.initialize(pipeline_config=self.pipeline_config, blocking=False))
         ray.get(refs)
@@ -360,9 +360,7 @@ class RLVRMathVLMPipeline(BasePipeline):
                         )
 
                     with Timer(name="cal_ref_log_probs_reward", logger=None) as cal_timer:
-                        if self.is_lora:
-                            batch.meta_info["disable_adapter"] = True
-                            batch.meta_info["is_offload_states"] = False
+                        if self.is_lora or not self.pipeline_config.enable_reference:
                             ref_log_probs_refs: List[ray.ObjectRef] = self.actor_train.compute_log_probs(
                                 batch, blocking=False
                             )

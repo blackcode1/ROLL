@@ -310,7 +310,7 @@ class RLVRPipeline(BasePipeline):
         refs.extend(self.actor_infer.initialize(pipeline_config=self.pipeline_config, blocking=False))
         ray.get(refs)
 
-        if not self.is_lora:
+        if not self.is_lora and self.pipeline_config.enable_reference:
             refs.extend(self.reference.initialize(pipeline_config=self.pipeline_config, blocking=True))
 
         refs = []
@@ -539,7 +539,7 @@ class RLVRPipeline(BasePipeline):
             
 
                 with Timer(name="cal_ref_log_probs", logger=None) as cal_ref_log_probs_timer:
-                    if self.is_lora:
+                    if self.is_lora or not self.pipeline_config.enable_reference:
                         batch.meta_info["disable_adapter"] = True
                         batch.meta_info["is_offload_states"] = False
                         ref_log_probs = self.actor_train.compute_log_probs(batch, blocking=True)
