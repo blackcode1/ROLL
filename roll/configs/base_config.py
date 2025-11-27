@@ -309,6 +309,11 @@ class PPOConfig(BaseConfig):
         default_factory=WorkerConfig, metadata={"help": "Configuration for the reference role."}
     )
 
+    use_reference: bool = field(
+        default=True, 
+        metadata={"help": "Whether to use reference model for KL divergence computation. If False, reference model will not be initialized."}
+    )
+
     async_generation_ratio: float = field(
         default=0,
         metadata={
@@ -389,11 +394,12 @@ class PPOConfig(BaseConfig):
         if (
             self.actor_train.model_args.model_name_or_path is None
             or self.actor_infer.model_args.model_name_or_path is None
-            or self.reference.model_args.model_name_or_path is None
+            or (self.use_reference and self.reference.model_args.model_name_or_path is None)
         ):
             self.actor_train.model_args.model_name_or_path = self.pretrain
             self.actor_infer.model_args.model_name_or_path = self.pretrain
-            self.reference.model_args.model_name_or_path = self.pretrain
+            if self.use_reference:
+                self.reference.model_args.model_name_or_path = self.pretrain
 
         if self.critic.model_args.model_name_or_path is None:
             self.critic.model_args.model_name_or_path = self.reward_pretrain

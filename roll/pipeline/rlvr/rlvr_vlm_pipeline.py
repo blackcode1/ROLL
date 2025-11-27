@@ -313,13 +313,16 @@ class RLVRVLMPipeline(BasePipeline):
             resource_manager=self.resource_manager,
             worker_config=self.pipeline_config.actor_infer,
         )
-        self.reference: Any = Cluster(
-            name=self.pipeline_config.reference.name,
-            worker_cls=self.pipeline_config.reference.worker_cls,
-            resource_manager=self.resource_manager,
-            worker_config=self.pipeline_config.reference,
-        )
-        download_clusters = [self.actor_train, self.actor_infer, self.reference]
+        if self.pipeline_config.use_reference:
+            self.reference: Any = Cluster(
+                name=self.pipeline_config.reference.name,
+                worker_cls=self.pipeline_config.reference.worker_cls,
+                resource_manager=self.resource_manager,
+                worker_config=self.pipeline_config.reference,
+            )
+            download_clusters = [self.actor_train, self.actor_infer, self.reference]
+        else:
+            download_clusters = [self.actor_train, self.actor_infer]
         if self.pipeline_config.adv_estimator == "gae":
             self.critic: Any = Cluster(
                 name=self.pipeline_config.critic.name,
@@ -542,7 +545,11 @@ class RLVRVLMPipeline(BasePipeline):
                 batch.meta_info["_broadcast_non_tensor_batch"]= True
 
                 with Timer(name="cal_ref_log_probs", logger=None) as cal_ref_log_probs_timer:
-                    ref_log_probs = self.reference.compute_log_probs(batch, blocking=True)
+                    if self.pipeline_config.use_reference:
+                        ref_log_probs = self.reference.compute_log_probs(batch, blocking=True)
+                    else:
+                        # When reference model is disabled, use actor's own log probabilities as reference
+                        ref_log_probs = self.actor_infer.compute_log_probs(batch, blocking=True)
                     metrics_mgr.add_reduced_metrics(ref_log_probs.meta_info.pop("metrics", {}))
                     ref_log_probs.rename(old_keys="log_probs", new_keys="ref_log_probs")
                     batch = batch.union(ref_log_probs)
